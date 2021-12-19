@@ -1,23 +1,19 @@
 #  Use to get the list of paired devices on the user computer.
 #  Depending on with OS we can use the same methode.
 
-import platform  # use to find out the user's OS
 import subprocess
 
-from logger import logger
-
 import bluetooth
+
+from logger import logger
 
 NAME = 'RFIDTIMETRACKER'
 
 
 class PCBluetoothManager:
-    _bluetooth_paired_devices = []
+    _bluetooth_paired_devices = dict()
 
     def __init__(self):
-        self.get_paired_devices()
-
-    def get_paired_devices(self):
         #  we set the duration to 1 to get a fast search, we only get the
         #  already paired devices. We want the name and the address but
         #  not the class.
@@ -26,48 +22,30 @@ class PCBluetoothManager:
         ):
             address, name = device
             if NAME in name.upper():
-                self._bluetooth_paired_devices.append(
-                    f'{name} | {address}'
-                )
+                self._bluetooth_paired_devices[name] = address
 
-    # the other function are identical in linux and windows
+    @property
+    def name_mac(self):
+        return self._bluetooth_paired_devices
 
-    def get_mac_address(self):  # we use the name to find the
-        # address
-        logger.debug("get mac address from name")
-        for device in self._bluetooth_paired_devices:
-            if NAME in device:
-                return device[16:33]
+    def get_mac_address(self):
+        return self.name_mac.get(NAME, None)
 
-    def get_all_paired_device_address(self):  # we extract the address
-        logger.debug("extract address")
-        addresses = []
-        for device in self._bluetooth_paired_devices:
-            addresses.append(device[16:33])
-        return addresses
+    @property
+    def macs(self):
+        return self.name_mac.values()
 
-    def get_all_paired_device_names(self) -> list:  # we extract the name
-        logger.debug("extract name")
-        name = []
-        for device in self._bluetooth_paired_devices:
-            name.append(device[0:13])
-        return name
+    @property
+    def names(self) -> list:  # we extract the name
+        return list(self.name_mac.keys())
 
 
 class BoardBluetoothManager:
     def __init__(self):
-        # Discoverable on
-        command = ['sudo', 'hciconfig', 'hci0', 'piscan']
-        subprocess.check_output(command, stderr=subprocess.STDOUT)
-        # Setting up the new name from the ssid
-        open_blue = subprocess.Popen(
-            ["bluetoothctl"],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE
-        )
-        open_blue.communicate(f"system-alias {NAME}".encode('ascii'))
+        # self._make_discoverable()
+        subprocess.run(["bluetoothctl", "power", "on"])
+        subprocess.run(["bluetoothctl", "discoverable", "on"])
+        subprocess.run(["bluetoothctl", "pairable", "on"])
         logger.info('Bluetooth has been updated')
         command = ["cat", "/sys/kernel/debug/bluetooth/hci0/identity"]
         output = subprocess.check_output(
