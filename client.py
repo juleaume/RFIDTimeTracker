@@ -1,5 +1,6 @@
 # -- coding: utf-8 --
 import socket
+import sys
 
 import RPi.GPIO as GPIO
 from pirc522 import RFID
@@ -42,7 +43,6 @@ class Client:
 
     def __init__(self):
         # setup bluetooth
-        self.bluetooth_manager = BoardBluetoothManager()
         self.channel = CommunicationChannel(side='Board')
         self._read_thread = None
         self._update_time_thread = None
@@ -70,7 +70,9 @@ class Client:
                         logger.info("> Connected")
                         break
                 while not self.channel.is_closed:
+                    logger.info("reading command")
                     _command = self.channel.read_command()
+                    logger.info(_command)
                     if _command is not None:
                         name, value = _command
                     else:
@@ -80,6 +82,17 @@ class Client:
                             self.start_reading()
                     elif name == "write":
                         self._write(value)
+                    elif name == "send":
+                        self._send_data()
+                    elif name == "stop":
+                        if value == "update":
+                            self.stop_updating()
+                        elif value == "read":
+                            self.stop_reading()
+                        else:
+                            sys.exit(0)
+                    elif name == "disconnect":
+                        self.channel.cleanup()
             except KeyboardInterrupt:
                 break
             except socket.timeout:
@@ -93,20 +106,22 @@ class Client:
 
     def _read(self):
         while self.is_reading:
-            logger.info("> Waiting")
-            uid = self._read_tag()
+            logger.info("> Waiting to read new tag")
+            uid = self._read_tag()  # blocking call
+            if not self.is_reading:  # check if still reading
+                break
             if uid is not None:
                 if not uid == self._last_id:
                     self.record_new_activity(uid)
             time.sleep(1)
 
     def _write(self, task):
+        self.stop_updating()
         self.stop_reading()
-        logger.info("> Waiting")
+        logger.info(f"> Waiting for new tag to write {task}")
         uid = self._read_tag()
         if uid is not None:
             self._record_new_task(uid, task)
-        self.start_reading()
 
     def _read_tag(self):
         self.rc522.wait_for_tag()  # blocking call
@@ -115,11 +130,17 @@ class Client:
             error, uid = self.rc522.anticoll()
             if not error:
                 if str(uid) not in self._lookup_table.keys():
-                    logger.info(f"tag: {uid}")
+                    logger.info(f"unknown tag: {uid}")
                 if uid == debug_uid:
                     self.__debug_record()
                 return uid
         return None
+
+    def _send_data(self):
+        if self.channel is not None and not self.channel.is_closed:
+            self.channel.send_sensor(
+                "data", (self._activity_table, self._index_table)
+            )
 
     def __debug_record(self):
         time.sleep(10)
@@ -133,6 +154,8 @@ class Client:
         :return:
         """
         self._lookup_table[str(uid)] = task
+        self._last_id = None
+        logger.info(f"New task registered: {task}")
 
     def record_new_activity(self, uid: list):
         """
@@ -181,4 +204,7 @@ class Client:
 
 
 if __name__ == '__main__':
-    client = Client()
+    try:
+        client = Client()
+    except Exception as e:
+        logger.exception(e)
