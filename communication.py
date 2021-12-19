@@ -111,15 +111,13 @@ class CommunicationChannel(BaseChannel):
                     logger.exception(err)
                     raise ConnectionRefusedError
                 self._connection = _socket
-                self._file = _socket.makefile('b')
+                self._file = _socket.makefile('rwb')
 
                 # motor stream
                 time.sleep(.2)  # make sure the board has time to listen for
                 # the second socket connection
                 name, info = self._read_object(ignore_lock=True)
                 # do stuff with name info
-
-
             else:
                 _socket = socket.socket(
                     socket.AF_BLUETOOTH,
@@ -134,7 +132,7 @@ class CommunicationChannel(BaseChannel):
                 _socket.listen(1)
                 self._connection, _ = _socket.accept()
                 _socket.close()
-                self._file = self._connection.makefile('wb')
+                self._file = self._connection.makefile('rwb')
                 logger.info(' [accepted connection]')
 
                 # motor stream
@@ -166,19 +164,21 @@ class CommunicationChannel(BaseChannel):
             except Exception as e:
                 logger.exception(e)
             self.cleanup()
+        else:
+            logger.info("Channel already disconnected")
 
     def cleanup(self):
         logger.info(
             'Cleaning up communication channel ({} side)'.format(self.side)
         )
         self.ready = False
-        if self._socket:
+        if self._socket is not None:
             self._socket.close()
             self._socket = None
-        if self._connection:
+        if self._connection is not None:
             self._connection.close()
             self._connection = None
-        if self._file and not self._file.closed:
+        if self._file is not None and not self._file.closed:
             try:
                 self._file.close()
             except Exception as e:
@@ -189,7 +189,10 @@ class CommunicationChannel(BaseChannel):
 
     @property
     def is_closed(self):
-        return self._file.closed
+        if self._file is not None:
+            return self._file.closed
+        else:
+            return True
 
     def _send_object(self, name: str, value=None, ignore_lock=False):
         # lock system
@@ -244,7 +247,7 @@ class CommunicationChannel(BaseChannel):
             return '', None
 
         # select channel
-        s = self._connection
+        s = self._connection  # type: socket.socket
         f = self._file
 
         # read and handle connection errors
@@ -298,7 +301,7 @@ class CommunicationChannel(BaseChannel):
                 raise err
         except ConnectionResetError:
             logger.warning("Connection lost while reading object")
+            self.cleanup()
         finally:
             if not ignore_lock:
                 self.read_lock = False
-
