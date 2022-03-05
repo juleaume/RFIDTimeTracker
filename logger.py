@@ -10,7 +10,7 @@ if not os.path.isdir("log"):
 _log_handler = RotatingFileHandler(
     _log_file_name, maxBytes=0xfffff, backupCount=5
 )  # 1 Mio - 1 o, 5 old log files
-_log_handler.setLevel(logging.DEBUG)
+_log_handler.setLevel(logging.INFO)
 
 logger = logging.Logger("logger")
 
