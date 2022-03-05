@@ -29,7 +29,7 @@ class Window(QMainWindow):
         )
         funcs = (
             self._connect, self._read, self._write, self._download,
-            lambda: self.channel.send_command("stop", "update")
+            self._stop_reading
         )
         enabled = (True, False, False, False, False)
         for b, f, e in zip(buttons, funcs, enabled):
@@ -82,6 +82,11 @@ class Window(QMainWindow):
             csv_writer = csv.writer(csv_file, delimiter=',')
             for task, date, duration in zip(indexes, dates, times):
                 csv_writer.writerow([task, date, duration])
+
+    def _stop_reading(self):
+        self.channel.send_command("stop", "update")
+        self._buttons.get("Read Tag").setEnabled(True)
+        self._buttons.get("Write Tag").setEnabled(True)
 
 
 class NameDialog(QDialog):
