@@ -1,8 +1,13 @@
+import time
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, \
     QPushButton, QDialog, QLineEdit, QGridLayout
 
 from communication import CommunicationChannel
 from logger import logger
+import csv
+
+TIMETABLE = "timetable.csv"
 
 
 class Window(QMainWindow):
@@ -42,6 +47,7 @@ class Window(QMainWindow):
         if self.channel.is_closed:
             try:
                 self.channel.check_hand()
+                self.channel.send_command("set_time", time.asctime())
                 self._buttons["Connection"].setText("Disconnection")
                 for b in self._buttons.values():
                     b.setEnabled(True)
@@ -69,8 +75,13 @@ class Window(QMainWindow):
 
     def _download(self):
         self.channel.send_command("send", "")
-        self.worktable = self.channel.read_sensor()
+        _, self.worktable = self.channel.read_sensor()
         logger.info(self.worktable)
+        times, dates, indexes = self.worktable
+        with open(TIMETABLE, 'w', newline='') as csv_file:
+            csv_writer = csv.writer(csv_file, delimiter=',')
+            for task, date, duration in zip(indexes, dates, times):
+                csv_writer.writerow([task, date, duration])
 
 
 class NameDialog(QDialog):

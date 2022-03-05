@@ -1,6 +1,9 @@
 # -- coding: utf-8 --
+import os.path
 import socket
+import subprocess
 import sys
+import pickle
 
 import RPi.GPIO as GPIO
 from pirc522 import RFID
@@ -11,10 +14,20 @@ from communication import CommunicationChannel
 from logger import logger
 from bluetooth_manager import BoardBluetoothManager
 
-GPIO.setmode(GPIO.BOARD)  # Définit le mode de numérotation (Board)
-GPIO.setwarnings(False)  # On désactive les messages d'alerte
+GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
 
-debug_uid = [136, 4, 114, 215, 41]
+debug_uid = str([136, 4, 114, 215, 41])
+
+LOOKUP_FILE = "lookup_table.pkl"
+if not os.path.isfile(LOOKUP_FILE):
+    with open(LOOKUP_FILE, 'wb') as lookup_file:
+        pickle.dump({debug_uid: "DEBUG"}, lookup_file)
+
+ACTIVITY_TABLE = "activity_table.pkl"
+if not os.path.isfile(ACTIVITY_TABLE):
+    with open(ACTIVITY_TABLE, 'wb') as activity_file:
+        pickle.dump(([], [], []), activity_file)
 
 
 class Client:
@@ -28,14 +41,12 @@ class Client:
     rc522 = RFID()
     _last_id = None
     _tic_task = -float('inf')  # start of the task
-    # _lookup_table = dict()
-    _lookup_table = {
-        "[89, 26, 210, 178, 35]": "testing",
-        "[25, 54, 10, 163, 134]": "changing"
-
-    }
-    _activity_table = list()
-    _index_table = list()
+    with open(LOOKUP_FILE, 'rb') as f:
+        _lookup_table = pickle.load(f)
+    with open(ACTIVITY_TABLE, 'rb') as f:
+        _activity_tuple = pickle.load(f)
+        print(_activity_tuple)
+    _activity_table, _absolute_time_table, _index_table = _activity_tuple
 
     is_reading = True
     is_updating = True
@@ -46,8 +57,6 @@ class Client:
         self.channel = CommunicationChannel(side='Board')
         self._read_thread = None
         self._update_time_thread = None
-        self._connection_thread = threading.Thread(target=self._run)
-        self._connection_thread.start()
         self.start_reading()
 
     def stop_reading(self):
@@ -61,10 +70,11 @@ class Client:
         self._read_thread = threading.Thread(target=self._read)
         self._read_thread.start()
 
-    def _run(self):
+    def run(self):
         while True:
             try:
                 while True:
+                    logger.info("> Checking hand")
                     self.channel.check_hand()
                     if self.channel.connected:
                         logger.info("> Connected")
@@ -87,12 +97,16 @@ class Client:
                     elif name == "stop":
                         if value == "update":
                             self.stop_updating()
+                            self.start_reading()
                         elif value == "read":
                             self.stop_reading()
                         else:
                             sys.exit(0)
                     elif name == "disconnect":
                         self.channel.cleanup()
+                    elif name == "set_time":
+                        logger.info(f"setting time to {value}")
+                        subprocess.call(["sudo", "date",  "-s", value])
             except KeyboardInterrupt:
                 break
             except socket.timeout:
@@ -131,16 +145,24 @@ class Client:
             if not error:
                 if str(uid) not in self._lookup_table.keys():
                     logger.info(f"unknown tag: {uid}")
-                if uid == debug_uid:
-                    self.__debug_record()
+                # if uid == debug_uid:
+                #     self.__debug_record()
                 return uid
         return None
 
     def _send_data(self):
         if self.channel is not None and not self.channel.is_closed:
             self.channel.send_sensor(
-                "data", (self._activity_table, self._index_table)
+                "data", self.data
             )
+
+    @property
+    def data(self):
+        return (
+            self._activity_table,
+            self._absolute_time_table,
+            self._index_table
+        )
 
     def __debug_record(self):
         time.sleep(10)
@@ -154,6 +176,8 @@ class Client:
         :return:
         """
         self._lookup_table[str(uid)] = task
+        with open(LOOKUP_FILE, 'wb') as f:
+            pickle.dump(self._lookup_table, f)  # save the new uuid
         self._last_id = None
         logger.info(f"New task registered: {task}")
 
@@ -170,6 +194,7 @@ class Client:
         logger.info(f"Starting task {task}")
         self.stop_updating()
         self._index_table.append(task)
+        self._absolute_time_table.append(time.asctime())
         self._activity_table.append(0)
         self._last_id = uid
         self._tic_task = time.time()
@@ -184,10 +209,12 @@ class Client:
         """
         self.is_updating = True
         while self.is_updating:
-            logger.info(
+            logger.debug(
                 f"update time of {self._lookup_table.get(str(self._last_id))}"
             )
-            self._activity_table[-1] = time.time() - self._tic_task
+            self._activity_table[-1] = int(time.time() - self._tic_task)
+            with open(ACTIVITY_TABLE, 'wb') as f:
+                pickle.dump(self.data, f)
             time.sleep(1)
         logger.info("Updating stopped")
 
@@ -206,5 +233,8 @@ class Client:
 if __name__ == '__main__':
     try:
         client = Client()
+        client.run()
     except Exception as e:
         logger.exception(e)
+    finally:
+        logger.info("stopping device")
