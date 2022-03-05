@@ -1,7 +1,7 @@
 from paramiko.client import SSHClient, AutoAddPolicy
 from logger import logger
 
-RobotIP = '192.168.1.52'
+RobotIP = '192.168.1.5'
 RobotPort = 22
 RobotID = 'pi'
 RobotPW = 'raspberry'
